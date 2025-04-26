@@ -21,11 +21,9 @@ app.get('/getSheet', async (req, res) => {
     }
 
     try {
-        console.log('connectiing to db')
         await client.connect();
         const db = client.db(DB_NAME);
         const collection = db.collection(COLLECTION_NAME);
-        console.log('connected')
         const result = await collection.aggregate([
             { $match: {user} },
             {
@@ -56,48 +54,38 @@ app.get('/getSheet', async (req, res) => {
 
 
 
+app.patch('/api/updateCell', async (req, res) => {
+    const {user, sheetID, row, cell, value} = req.body;
 
-app.get('/gettable', async (req, res) => {
-    console.log("called2")
-    try {
-      await client.connect();
-      //console.log("here")
-      const db = client.db('oxidb');
-      const collection = db.collection('firstcollection');
-      const data = await collection.find({}).toArray();
-      //console.log(data);
-      res.json(data);
-    } catch (err) {
-      res.status(500).send('Error fetching data');
-    }
-  });
-  
-
-
-app.post('/updatedSheet', async (req, res) => {
-    const {_id, row, col, newValue} = req.body;
-    console.log("updatingg sheet")
-    console.log(req.body);
     try {
         await client.connect();
         const db = client.db(DB_NAME);
         const collection = db.collection(COLLECTION_NAME);
 
         const udpate_result = await collection.updateOne(
-            {_id: ObjectId.createFromHexString(_id), "data.row": row},
+            { user, 'sheets.sheetID': sheetID },
             {
-                $set: {
-                    "data.$.cell.$[elem].value": newValue
-                }
+            $set: {
+                'sheets.$[sheetI].data.$[rowI].col.$[cellI].value': value
+            }
             },
             {
-                arrayFilters: [{"elem.col": col}]
+            arrayFilters: [
+                { 'sheetI.sheetID': sheetID },
+                { 'rowI.row': row },
+                { 'cellI.cell': cell }
+            ]
             }
         );
 
-        res.json({ modifiedCount: udpate_result.modifiedCount});
+        if (udpate_result.modifiedCount > 0){
+            res.json({ 
+                success: 1,
+                modifiedCount: udpate_result.modifiedCount
+            });
+        }
     } catch (err) {
-        console.error(err);
+        console.error('Error updating sheet:', error);
         res.status(500).send('Failed to udppate the cell');
     }
 
