@@ -53,42 +53,92 @@ app.get('/getSheet', async (req, res) => {
 });
 
 
-
 app.patch('/api/updateCell', async (req, res) => {
-    const {user, sheetID, row, cell, value} = req.body;
+  const { user, sheetID, row, cell, value } = req.body;
 
-    try {
-        await client.connect();
-        const db = client.db(DB_NAME);
-        const collection = db.collection(COLLECTION_NAME);
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const collection = db.collection(COLLECTION_NAME);
 
-        const udpate_result = await collection.updateOne(
-            { user, 'sheets.sheetID': sheetID },
-            {
-            $set: {
-                'sheets.$[sheetI].data.$[rowI].col.$[cellI].value': value
-            }
-            },
-            {
-            arrayFilters: [
-                { 'sheetI.sheetID': sheetID },
-                { 'rowI.row': row },
-                { 'cellI.cell': cell }
-            ]
-            }
-        );
-
-        if (udpate_result.modifiedCount > 0){
-            res.json({ 
-                success: 1,
-                modifiedCount: udpate_result.modifiedCount
-            });
+    // Step 1: Try fast direct update of existing cell
+    const fastUpdate = await collection.updateOne(
+      { user, 'sheets.sheetID': sheetID },
+      {
+        $set: {
+          'sheets.$[sheetI].data.$[rowI].col.$[cellI].value': value
         }
-    } catch (err) {
-        console.error('Error updating sheet:', error);
-        res.status(500).send('Failed to udppate the cell');
+      },
+      {
+        arrayFilters: [
+          { 'sheetI.sheetID': sheetID },
+          { 'rowI.row': row },
+          { 'cellI.cell': cell }
+        ]
+      }
+    );
+
+    if (fastUpdate.modifiedCount > 0) {
+      return res.json({ success: 1, mode: 'fast-update' });
     }
 
+    // Step 2: If cell not found, try pushing a new cell into existing row
+    const pushCell = await collection.updateOne(
+      { user, 'sheets.sheetID': sheetID, 'sheets.data.row': row },
+      {
+        $push: {
+          'sheets.$[sheetI].data.$[rowI].col': {
+            cell,
+            value,
+            style: {} // default empty style
+          }
+        }
+      },
+      {
+        arrayFilters: [
+          { 'sheetI.sheetID': sheetID },
+          { 'rowI.row': row }
+        ]
+      }
+    );
+
+    if (pushCell.modifiedCount > 0) {
+      return res.json({ success: 1, mode: 'pushed-new-cell' });
+    }
+
+    // Step 3: If row also doesn't exist, push a new row with new cell
+    const pushRow = await collection.updateOne(
+      { user, 'sheets.sheetID': sheetID },
+      {
+        $push: {
+          'sheets.$[sheetI].data': {
+            row,
+            col: [{
+              cell,
+              value,
+              style: {} // default style
+            }]
+          }
+        }
+      },
+      {
+        arrayFilters: [
+          { 'sheetI.sheetID': sheetID }
+        ]
+      }
+    );
+
+    if (pushRow.modifiedCount > 0) {
+      return res.json({ success: 1, mode: 'pushed-new-row-and-cell' });
+    }
+
+    // Step 4: If none of the updates worked
+    res.status(404).json({ success: 0, error: 'User or Sheet not found' });
+
+  } catch (error) {
+    console.error('Error updating sheet:', error);
+    res.status(500).send('Internal Server Error');
+  }
 });
 
 app.listen(3000, () => console.log('Server running on http://localhost:3000'));
