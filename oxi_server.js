@@ -15,6 +15,7 @@ const COLLECTION_NAME = 'coll_halkat_01';
 
 
 app.get('/getSheet', async (req, res) => {
+    console.log('getSheet called with query:', req.query);
     const {user, sheetID} = req.query;
     if(!user || !sheetID) {
         return res.status(400).send('User id or the sheetId is missing');
@@ -54,20 +55,32 @@ app.get('/getSheet', async (req, res) => {
 
 
 app.patch('/api/updateCell', async (req, res) => {
-  const { user, sheetID, row, cell, value } = req.body;
-
+  const { user, sheetID, row, cell, value, style } = req.body;
+  console.log('updateCell called with style:', row, cell, value, style);
   try {
     await client.connect();
     const db = client.db(DB_NAME);
     const collection = db.collection(COLLECTION_NAME);
 
+    // Build $set dynamically to patch only style keys provided
+    const styleSetOps = style
+      ? Object.fromEntries(
+          Object.entries(style).map(([key, val]) => [
+            `sheets.$[sheetI].data.$[rowI].col.$[cellI].style.${key}`, val
+          ])
+        )
+      : {};
+
+    const updateFields = {
+      [`sheets.$[sheetI].data.$[rowI].col.$[cellI].value`]: value,
+      ...styleSetOps
+    };
+
     // Step 1: Try fast direct update of existing cell
     const fastUpdate = await collection.updateOne(
       { user, 'sheets.sheetID': sheetID },
       {
-        $set: {
-          'sheets.$[sheetI].data.$[rowI].col.$[cellI].value': value
-        }
+        $set: updateFields
       },
       {
         arrayFilters: [
@@ -90,7 +103,7 @@ app.patch('/api/updateCell', async (req, res) => {
           'sheets.$[sheetI].data.$[rowI].col': {
             cell,
             value,
-            style: {} // default empty style
+            style: style || {} // default empty style
           }
         }
       },
@@ -116,7 +129,7 @@ app.patch('/api/updateCell', async (req, res) => {
             col: [{
               cell,
               value,
-              style: {} // default style
+              style: style || {} // default style
             }]
           }
         }
