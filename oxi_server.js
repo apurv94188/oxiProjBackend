@@ -154,4 +154,111 @@ app.patch('/api/updateCell', async (req, res) => {
   }
 });
 
+
+
+app.patch('/api/updateColStyle', async (req, res) => {
+  const { user, sheetID, col, style } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const collection = db.collection(COLLECTION_NAME);
+
+    // Try updating existing col style
+    const result = await collection.updateOne(
+      { user, 'sheets.sheetID': sheetID },
+      {
+        $set: {
+          'sheets.$[sheetI].defaultCol.$[colI].style.width': style.width
+        }
+      },
+      {
+        arrayFilters: [
+          { 'sheetI.sheetID': sheetID },
+          { 'colI.col': col }
+        ]
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      await collection.updateOne(
+        { user, 'sheets.sheetID': sheetID },
+        {
+          $push: {
+            'sheets.$[sheetI].defaultCol': {
+              col,
+              style: { width: style.width }
+            }
+          }
+        },
+        {
+          arrayFilters: [{ 'sheetI.sheetID': sheetID }]
+        }
+      );
+    }
+
+    res.json({ success: 1 });
+  } catch (err) {
+    console.error('updateColStyle error:', err);
+    res.status(500).send('Failed to update column style');
+  }
+});
+
+
+
+app.patch('/api/updateRowstyle', async (req, res) => {
+  const { user, sheetID, row, style } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const collection = db.collection(COLLECTION_NAME);
+
+    const result = await collection.updateOne(
+      {user, 'sheets.sheetID': sheetID },
+      {
+        $set: {
+          'sheets.$[sheetI].data.$[rowI].defaultStyle.height': style.height
+        }
+      },
+      {
+        arrayFilters: [
+          { 'sheetI.sheetID': sheetID },
+          { 'rowI.row': row }
+        ]
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      return res.json({ success: 1, mode: 'updated-existing-row-defaultStyle' })
+    }
+
+    // If no rows were updated, try to push a new row with the style
+    const pushRow = await collection.updateOne(
+      { user, 'sheets.sheetID': sheetID },
+      {
+        $push: {
+          'sheets.$[sheetI].data': {
+            row,
+            defaultStyle: { height: style.height },
+            col: [] // Initialize with empty columns
+          }
+        }
+      },
+      {
+        arrayFilters: [{ 'sheetI.sheetID': sheetID }]
+      }
+    );
+
+    if (pushRow.modifiedCount > 0) {
+      return res.json({ success: 1, mode: 'pushed-new-row-with-style' });
+    }
+
+    res.status(404).json({ success: 0, error: 'Sheet not found' })
+  } catch (err) {
+    console.error('updateRowstyle error:', err);
+    res.json(500).send('Faield to udpate row style');
+  }
+});
+
 app.listen(3000, () => console.log('Server running on http://localhost:3000'));
